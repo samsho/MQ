@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:amq="http://activemq.apache.org/schema/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+	 http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+
+    <bean id="propertyConfigurer" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+        <property name="locations">
+            <list>
+                <value>classpath:applicationContext.properties</value>
+            </list>
+        </property>
+        <property name="fileEncoding" value="UTF-8"/>
+    </bean>
+
+
+    <!-- 配置connectionFactory -->
+    <!-- 配置JMS链接模版 -->
+    <bean id="connectionFactory" class="org.apache.activemq.spring.ActiveMQConnectionFactory">
+        <property name="brokerURL" value="${mq.broker.url}"/>
+        <!--只配置一个重发策略  -->
+        <!--<property name="redeliveryPolicy" ref="policy2" />  -->
+        <property name="useCompression" value="true"/>
+        <property name="redeliveryPolicyMap" ref="redeliveryPolicyMap"/>
+        <!-- 配置多个重发策略，可以将控制粒度细化到某一个队列-->
+    </bean>
+
+    <amq:redeliveryPolicyMap id="redeliveryPolicyMap">
+        <amq:defaultEntry>
+            <!-- default policy, 5 times with 10s delay each -->
+            <amq:redeliveryPolicy maximumRedeliveries="5" initialRedeliveryDelay="10000"/>
+        </amq:defaultEntry>
+        <amq:redeliveryPolicyEntries>
+            <!-- three times with exponential back-off, that is, 1s, 2s, 4s, 8s.
+                "queue" references to the "physicalName" defined in amq:queue -->
+            <amq:redeliveryPolicy queue="${mq.broker.queue.sh.lte.cj.destination}" maximumRedeliveries="5"
+                                  initialRedeliveryDelay="1000"
+                                  backOffMultiplier="2" useExponentialBackOff="true"/>
+            <!-- another policy mapping -->
+            <amq:redeliveryPolicy queue="${mq.broker.queue.sh.lte.cj.destination.test}" maximumRedeliveries="2"
+                                  initialRedeliveryDelay="4000"/>
+        </amq:redeliveryPolicyEntries>
+    </amq:redeliveryPolicyMap>
+
+    <!-- <bean id="policy2" class="org.apache.activemq.RedeliveryPolicy">
+        配置重传策略
+        <property name="initialRedeliveryDelay" value="1000" />
+        <property name="useExponentialBackOff" value="false" />
+        <property name="useCollisionAvoidance" value="false" />
+        <property name="maximumRedeliveries" value="3" />
+        指定队列名使用本策略进行重传    但是测试的时候无效，还是要使用destination，可能是测试方法不对
+        <property name="queue" value="QUEUE.STTTTT"></property>
+        指定destination使用本策略进行重传
+        <property name="destination" ref="queuedestination"></property>
+    </bean>  -->
+    <!-- Spring JMS Template -->
+    <!-- 配置JMS模版 -->
+    <bean id="queuejmsTemplate" class="org.springframework.jms.core.JmsTemplate">
+        <property name="connectionFactory" ref="connectionFactory"/>
+        <!-- 如果为Queue，则该值为false，如果为topic则该值为true否则pub无法收到信息 -->
+        <property name="pubSubDomain" value="false"/>
+        <property name="explicitQosEnabled" value="true"/>
+        <!-- deliveryMode, priority, timeToLive 的开关，要生效，必须配置为true，默认false -->
+        <property name="deliveryMode" value="2"/>
+        <!-- 发送模式 DeliveryMode.NON_PERSISTENT=1:非持久 ; DeliveryMode.PERSISTENT=2:持久 -->
+        <property name="sessionTransacted" value="true"/>
+        <property name="sessionAcknowledgeMode" value="2"/>
+        <!-- 消息应答方式
+        Session.AUTO_ACKNOWLEDGE 消息自动签收
+        Session.CLIENT_ACKNOWLEDGE 客户端调用acknowledge方法手动签收
+        Session.DUPS_OK_ACKNOWLEDGE 不必必须签收，消息可能会重复发送 -->
+    </bean>
+
+    <!-- 发送消息的目的地（一个队列） -->
+    <bean id="queuedestination" class="org.apache.activemq.command.ActiveMQQueue">
+        <!-- 设置消息队列的名字 -->
+        <constructor-arg index="0"
+                         value="${mq.broker.queue.sh.lte.cj.destination}"/>
+    </bean>
+    <bean id="queuedestination2" class="org.apache.activemq.command.ActiveMQQueue">
+        <constructor-arg index="0"
+                         value="${mq.broker.queue.sh.lte.cj.destination}"/>
+    </bean>
+    <bean id="sender" class="cluster.Sender">
+        <property name="jmsTemplate" ref="queuejmsTemplate"/>
+        <property name="destination" ref="queuedestination2"/>
+    </bean>
+    <!--消息获取类 -->
+    <bean id="receive" class="cluster.Receiver"/>
+    <!--给消息获取类加个监听让他能自动获取消息 -->
+    <bean id="queuelistenerContainer"
+          class="org.springframework.jms.listener.DefaultMessageListenerContainer">
+        <property name="connectionFactory" ref="connectionFactory"/>
+        <property name="destination" ref="queuedestination2"/>
+        <property name="messageListener" ref="receive"/>
+        <property name="sessionTransacted" value="true"/>
+    </bean>
+</beans>
